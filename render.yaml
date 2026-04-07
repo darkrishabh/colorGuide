@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: color-guide
+    runtime: docker
+    repo: https://github.com/darkrishabh/colorGuide
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 3000
