@@ -18,6 +18,20 @@ const cache = new CacheService();
 server.get("/health", async () => ({ ok: true }));
 
 const cacheKey = (prefix: string, url: string): string => `${prefix}:${new URL(url).toString().toLowerCase()}`;
+const normalizeError = (error: unknown): Record<string, string> => {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack ?? ""
+    };
+  }
+  return {
+    name: "UnknownError",
+    message: String(error),
+    stack: ""
+  };
+};
 
 server.get<{ Querystring: ExtractParams }>("/extract", async (request, reply) => {
   const { url, domain } = request.query;
@@ -41,7 +55,7 @@ server.get<{ Querystring: ExtractParams }>("/extract", async (request, reply) =>
     await cache.setJSON(key, normalized);
     return normalized;
   } catch (error) {
-    request.log.error({ error }, "Failed to extract style guide");
+    request.log.error({ error: normalizeError(error) }, "Failed to extract style guide");
     const resolvedUrl = ensureUrl({ url, domain });
     return createFallbackStyleGuide(resolvedUrl);
   }
@@ -111,7 +125,7 @@ server.get<{ Querystring: ExtractParams }>("/screenshot", async (request, reply)
     reply.header("content-type", "image/png");
     return reply.send(image);
   } catch (error) {
-    request.log.error({ error }, "Failed screenshot");
+    request.log.error({ error: normalizeError(error) }, "Failed screenshot");
     reply.code(502);
     return { error: "Screenshot failed" };
   }

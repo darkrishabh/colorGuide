@@ -11,8 +11,18 @@ const DEFAULT_UA =
 const BLOCKED_RESOURCE_TYPES = new Set(["image", "media", "font"]);
 const BLOCKED_HOST_PATTERNS = ["google-analytics", "googletagmanager", "doubleclick", "facebook.net"];
 
-async function getBrowser(): Promise<Browser> {
-  if (browserInstance) return browserInstance;
+async function getBrowser(forceNew = false): Promise<Browser> {
+  if (forceNew && browserInstance) {
+    try {
+      await browserInstance.close();
+    } catch {
+      // Ignore shutdown errors while resetting browser state.
+    }
+    browserInstance = null;
+  }
+
+  if (browserInstance && browserInstance.isConnected()) return browserInstance;
+  browserInstance = null;
   browserInstance = await chromium.launch({
     headless: true,
     args: ["--disable-dev-shm-usage", "--no-sandbox"]
@@ -20,33 +30,55 @@ async function getBrowser(): Promise<Browser> {
   return browserInstance;
 }
 
-async function withPage<T>(task: (page: Page, context: BrowserContext) => Promise<T>): Promise<T> {
-  const browser = await getBrowser();
-  const context = await browser.newContext({
-    userAgent: DEFAULT_UA,
-    viewport: { width: 1440, height: 900 },
-    javaScriptEnabled: true
-  });
+function isBrowserSessionError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return (
+    message.includes("Target page, context or browser has been closed") ||
+    message.includes("Browser has been closed") ||
+    message.includes("Connection closed") ||
+    message.includes("Protocol error")
+  );
+}
 
-  const page = await context.newPage();
-  await page.route("**/*", (route: Route) => {
-    const request = route.request();
-    const requestUrl = request.url().toLowerCase();
-    if (BLOCKED_RESOURCE_TYPES.has(request.resourceType())) {
-      route.abort().catch(() => undefined);
-      return;
+async function withPage<T>(task: (page: Page, context: BrowserContext) => Promise<T>): Promise<T> {
+  const run = async () => {
+    const browser = await getBrowser();
+    const context = await browser.newContext({
+      userAgent: DEFAULT_UA,
+      viewport: { width: 1440, height: 900 },
+      javaScriptEnabled: true
+    });
+
+    const page = await context.newPage();
+    await page.route("**/*", (route: Route) => {
+      const request = route.request();
+      const requestUrl = request.url().toLowerCase();
+      if (BLOCKED_RESOURCE_TYPES.has(request.resourceType())) {
+        route.abort().catch(() => undefined);
+        return;
+      }
+      if (BLOCKED_HOST_PATTERNS.some((pattern) => requestUrl.includes(pattern))) {
+        route.abort().catch(() => undefined);
+        return;
+      }
+      route.continue().catch(() => undefined);
+    });
+
+    try {
+      return await task(page, context);
+    } finally {
+      await context.close().catch(() => undefined);
     }
-    if (BLOCKED_HOST_PATTERNS.some((pattern) => requestUrl.includes(pattern))) {
-      route.abort().catch(() => undefined);
-      return;
-    }
-    route.continue().catch(() => undefined);
-  });
+  };
 
   try {
-    return await task(page, context);
-  } finally {
-    await context.close();
+    return await run();
+  } catch (error) {
+    if (isBrowserSessionError(error)) {
+      await getBrowser(true);
+      return run();
+    }
+    throw error;
   }
 }
 

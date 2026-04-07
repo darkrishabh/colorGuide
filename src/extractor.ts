@@ -68,8 +68,18 @@ type RawExtracted = {
 
 let browserInstance: Browser | null = null;
 
-async function getBrowser(): Promise<Browser> {
-  if (browserInstance) return browserInstance;
+async function getBrowser(forceNew = false): Promise<Browser> {
+  if (forceNew && browserInstance) {
+    try {
+      await browserInstance.close();
+    } catch {
+      // Ignore shutdown errors while resetting browser state.
+    }
+    browserInstance = null;
+  }
+
+  if (browserInstance && browserInstance.isConnected()) return browserInstance;
+  browserInstance = null;
   browserInstance = await chromium.launch({
     headless: true,
     args: ["--disable-dev-shm-usage", "--no-sandbox"]
@@ -77,154 +87,27 @@ async function getBrowser(): Promise<Browser> {
   return browserInstance;
 }
 
-const COLOR_NAMES: Record<string, string> = {
-  black: "#000000",
-  white: "#ffffff",
-  red: "#ff0000",
-  green: "#008000",
-  blue: "#0000ff",
-  transparent: "#ffffff"
-};
-
-function normalizeUrl(url?: string, domain?: string): string {
-  if (url) {
-    return new URL(url).toString();
-  }
-  if (!domain) {
-    throw new Error("Either url or domain must be provided");
-  }
-  const normalizedDomain = domain.replace(/^https?:\/\//i, "").trim();
-  return new URL(`https://${normalizedDomain}`).toString();
+function isBrowserSessionError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return (
+    message.includes("Target page, context or browser has been closed") ||
+    message.includes("Browser has been closed") ||
+    message.includes("Connection closed") ||
+    message.includes("Protocol error")
+  );
 }
 
-function rgbToHex(r: number, g: number, b: number): string {
-  const clamp = (value: number) => Math.max(0, Math.min(255, Math.round(value)));
-  return `#${[clamp(r), clamp(g), clamp(b)].map((n) => n.toString(16).padStart(2, "0")).join("")}`;
-}
-
-function hslToRgb(h: number, s: number, l: number): [number, number, number] {
-  const sat = s / 100;
-  const light = l / 100;
-  const c = (1 - Math.abs(2 * light - 1)) * sat;
-  const hp = (h % 360) / 60;
-  const x = c * (1 - Math.abs((hp % 2) - 1));
-  let [r1, g1, b1] = [0, 0, 0];
-  if (hp >= 0 && hp < 1) [r1, g1, b1] = [c, x, 0];
-  else if (hp >= 1 && hp < 2) [r1, g1, b1] = [x, c, 0];
-  else if (hp >= 2 && hp < 3) [r1, g1, b1] = [0, c, x];
-  else if (hp >= 3 && hp < 4) [r1, g1, b1] = [0, x, c];
-  else if (hp >= 4 && hp < 5) [r1, g1, b1] = [x, 0, c];
-  else if (hp >= 5 && hp < 6) [r1, g1, b1] = [c, 0, x];
-  const m = light - c / 2;
-  return [(r1 + m) * 255, (g1 + m) * 255, (b1 + m) * 255];
-}
-
-function normalizeColor(input: string): string {
-  const value = input.trim().toLowerCase();
-  if (!value) return "#000000";
-
-  if (COLOR_NAMES[value]) return COLOR_NAMES[value];
-
-  if (value.startsWith("#")) {
-    const hex = value.slice(1);
-    if (hex.length === 3) {
-      return `#${hex.split("").map((char) => `${char}${char}`).join("")}`;
-    }
-    if (hex.length === 4) {
-      const [r, g, b, a] = hex.split("").map((char) => parseInt(`${char}${char}`, 16));
-      return rgbToHex(r * (a / 255) + 255 * (1 - a / 255), g * (a / 255) + 255 * (1 - a / 255), b * (a / 255) + 255 * (1 - a / 255));
-    }
-    if (hex.length === 6) return `#${hex}`;
-    if (hex.length === 8) {
-      const r = parseInt(hex.slice(0, 2), 16);
-      const g = parseInt(hex.slice(2, 4), 16);
-      const b = parseInt(hex.slice(4, 6), 16);
-      const a = parseInt(hex.slice(6, 8), 16) / 255;
-      return rgbToHex(r * a + 255 * (1 - a), g * a + 255 * (1 - a), b * a + 255 * (1 - a));
-    }
-  }
-
-  const rgbMatch = value.match(/^rgba?\(([^)]+)\)$/);
-  if (rgbMatch) {
-    const [r, g, b, alpha] = rgbMatch[1].split(",").map((part) => part.trim());
-    const rv = Number.parseFloat(r);
-    const gv = Number.parseFloat(g);
-    const bv = Number.parseFloat(b);
-    const av = alpha ? Number.parseFloat(alpha) : 1;
-    return rgbToHex(rv * av + 255 * (1 - av), gv * av + 255 * (1 - av), bv * av + 255 * (1 - av));
-  }
-
-  const hslMatch = value.match(/^hsla?\(([^)]+)\)$/);
-  if (hslMatch) {
-    const [h, s, l, alpha] = hslMatch[1].split(",").map((part) => part.trim().replace("%", ""));
-    const [r, g, b] = hslToRgb(Number.parseFloat(h), Number.parseFloat(s), Number.parseFloat(l));
-    const av = alpha ? Number.parseFloat(alpha) : 1;
-    return rgbToHex(r * av + 255 * (1 - av), g * av + 255 * (1 - av), b * av + 255 * (1 - av));
-  }
-
-  return "#000000";
-}
-
-function luminance(hex: string): number {
-  const color = hex.replace("#", "");
-  const channels = [0, 2, 4].map((idx) => Number.parseInt(color.slice(idx, idx + 2), 16) / 255);
-  const [r, g, b] = channels.map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-function quantile(sorted: number[], q: number): number {
-  if (sorted.length === 0) return 0;
-  const pos = (sorted.length - 1) * q;
-  const base = Math.floor(pos);
-  const rest = pos - base;
-  if (sorted[base + 1] !== undefined) {
-    return sorted[base] + rest * (sorted[base + 1] - sorted[base]);
-  }
-  return sorted[base];
-}
-
-function buildSpacingScale(values: number[]): StyleGuide["spacing"] {
-  const filtered = values.filter((value) => Number.isFinite(value) && value > 0).sort((a, b) => a - b);
-  const source = filtered.length ? filtered : [4, 8, 16, 24, 32];
-  return {
-    xs: `${Math.round(quantile(source, 0.1))}px`,
-    sm: `${Math.round(quantile(source, 0.3))}px`,
-    md: `${Math.round(quantile(source, 0.5))}px`,
-    lg: `${Math.round(quantile(source, 0.75))}px`,
-    xl: `${Math.round(quantile(source, 0.95))}px`
-  };
-}
-
-function buildShadowScale(shadows: string[]): StyleGuide["shadows"] {
-  const normalized = shadows.filter(Boolean).filter((shadow) => shadow !== "none");
-  const sorted = normalized.sort((a, b) => a.length - b.length);
-  return {
-    sm: sorted[0] ?? "none",
-    md: sorted[Math.min(1, sorted.length - 1)] ?? "none",
-    lg: sorted[Math.min(2, sorted.length - 1)] ?? "none",
-    xl: sorted[Math.min(3, sorted.length - 1)] ?? "none",
-    inner: normalized.find((shadow) => shadow.includes("inset")) ?? "none"
-  };
-}
-
-export function cacheKeyFromUrl(url: string): string {
-  return `style-guide:${new URL(url).hostname.toLowerCase()}`;
-}
-
-export async function extractStyleGuide(input: { url?: string; domain?: string }): Promise<StyleGuide> {
-  const targetUrl = normalizeUrl(input.url, input.domain);
-  const fallback = FALLBACK_STYLE_GUIDE(targetUrl);
+async function runExtraction(targetUrl: string, fallback: StyleGuide): Promise<StyleGuide> {
   const browser = await getBrowser();
+  const context = await browser.newContext({
+    userAgent:
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    viewport: { width: 1440, height: 900 },
+    javaScriptEnabled: true
+  });
+  const page = await context.newPage();
 
   try {
-    const context = await browser.newContext({
-      userAgent:
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-      viewport: { width: 1440, height: 900 },
-      javaScriptEnabled: true
-    });
-    const page = await context.newPage();
-
     try {
       await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 10_000 });
       await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => undefined);
@@ -452,8 +335,6 @@ export async function extractStyleGuide(input: { url?: string; domain?: string }
       })
       .catch(() => null);
 
-    await context.close();
-
     if (!raw) return fallback;
 
     const spacing = buildSpacingScale(raw.spacingValues);
@@ -480,7 +361,155 @@ export async function extractStyleGuide(input: { url?: string; domain?: string }
       components: raw.components
     };
   } finally {
-    // Browser instance is shared for lower latency.
+    await context.close().catch(() => undefined);
+  }
+}
+
+const COLOR_NAMES: Record<string, string> = {
+  black: "#000000",
+  white: "#ffffff",
+  red: "#ff0000",
+  green: "#008000",
+  blue: "#0000ff",
+  transparent: "#ffffff"
+};
+
+function normalizeUrl(url?: string, domain?: string): string {
+  if (url) {
+    return new URL(url).toString();
+  }
+  if (!domain) {
+    throw new Error("Either url or domain must be provided");
+  }
+  const normalizedDomain = domain.replace(/^https?:\/\//i, "").trim();
+  return new URL(`https://${normalizedDomain}`).toString();
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  const clamp = (value: number) => Math.max(0, Math.min(255, Math.round(value)));
+  return `#${[clamp(r), clamp(g), clamp(b)].map((n) => n.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  const sat = s / 100;
+  const light = l / 100;
+  const c = (1 - Math.abs(2 * light - 1)) * sat;
+  const hp = (h % 360) / 60;
+  const x = c * (1 - Math.abs((hp % 2) - 1));
+  let [r1, g1, b1] = [0, 0, 0];
+  if (hp >= 0 && hp < 1) [r1, g1, b1] = [c, x, 0];
+  else if (hp >= 1 && hp < 2) [r1, g1, b1] = [x, c, 0];
+  else if (hp >= 2 && hp < 3) [r1, g1, b1] = [0, c, x];
+  else if (hp >= 3 && hp < 4) [r1, g1, b1] = [0, x, c];
+  else if (hp >= 4 && hp < 5) [r1, g1, b1] = [x, 0, c];
+  else if (hp >= 5 && hp < 6) [r1, g1, b1] = [c, 0, x];
+  const m = light - c / 2;
+  return [(r1 + m) * 255, (g1 + m) * 255, (b1 + m) * 255];
+}
+
+function normalizeColor(input: string): string {
+  const value = input.trim().toLowerCase();
+  if (!value) return "#000000";
+
+  if (COLOR_NAMES[value]) return COLOR_NAMES[value];
+
+  if (value.startsWith("#")) {
+    const hex = value.slice(1);
+    if (hex.length === 3) {
+      return `#${hex.split("").map((char) => `${char}${char}`).join("")}`;
+    }
+    if (hex.length === 4) {
+      const [r, g, b, a] = hex.split("").map((char) => parseInt(`${char}${char}`, 16));
+      return rgbToHex(r * (a / 255) + 255 * (1 - a / 255), g * (a / 255) + 255 * (1 - a / 255), b * (a / 255) + 255 * (1 - a / 255));
+    }
+    if (hex.length === 6) return `#${hex}`;
+    if (hex.length === 8) {
+      const r = parseInt(hex.slice(0, 2), 16);
+      const g = parseInt(hex.slice(2, 4), 16);
+      const b = parseInt(hex.slice(4, 6), 16);
+      const a = parseInt(hex.slice(6, 8), 16) / 255;
+      return rgbToHex(r * a + 255 * (1 - a), g * a + 255 * (1 - a), b * a + 255 * (1 - a));
+    }
+  }
+
+  const rgbMatch = value.match(/^rgba?\(([^)]+)\)$/);
+  if (rgbMatch) {
+    const [r, g, b, alpha] = rgbMatch[1].split(",").map((part) => part.trim());
+    const rv = Number.parseFloat(r);
+    const gv = Number.parseFloat(g);
+    const bv = Number.parseFloat(b);
+    const av = alpha ? Number.parseFloat(alpha) : 1;
+    return rgbToHex(rv * av + 255 * (1 - av), gv * av + 255 * (1 - av), bv * av + 255 * (1 - av));
+  }
+
+  const hslMatch = value.match(/^hsla?\(([^)]+)\)$/);
+  if (hslMatch) {
+    const [h, s, l, alpha] = hslMatch[1].split(",").map((part) => part.trim().replace("%", ""));
+    const [r, g, b] = hslToRgb(Number.parseFloat(h), Number.parseFloat(s), Number.parseFloat(l));
+    const av = alpha ? Number.parseFloat(alpha) : 1;
+    return rgbToHex(r * av + 255 * (1 - av), g * av + 255 * (1 - av), b * av + 255 * (1 - av));
+  }
+
+  return "#000000";
+}
+
+function luminance(hex: string): number {
+  const color = hex.replace("#", "");
+  const channels = [0, 2, 4].map((idx) => Number.parseInt(color.slice(idx, idx + 2), 16) / 255);
+  const [r, g, b] = channels.map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function quantile(sorted: number[], q: number): number {
+  if (sorted.length === 0) return 0;
+  const pos = (sorted.length - 1) * q;
+  const base = Math.floor(pos);
+  const rest = pos - base;
+  if (sorted[base + 1] !== undefined) {
+    return sorted[base] + rest * (sorted[base + 1] - sorted[base]);
+  }
+  return sorted[base];
+}
+
+function buildSpacingScale(values: number[]): StyleGuide["spacing"] {
+  const filtered = values.filter((value) => Number.isFinite(value) && value > 0).sort((a, b) => a - b);
+  const source = filtered.length ? filtered : [4, 8, 16, 24, 32];
+  return {
+    xs: `${Math.round(quantile(source, 0.1))}px`,
+    sm: `${Math.round(quantile(source, 0.3))}px`,
+    md: `${Math.round(quantile(source, 0.5))}px`,
+    lg: `${Math.round(quantile(source, 0.75))}px`,
+    xl: `${Math.round(quantile(source, 0.95))}px`
+  };
+}
+
+function buildShadowScale(shadows: string[]): StyleGuide["shadows"] {
+  const normalized = shadows.filter(Boolean).filter((shadow) => shadow !== "none");
+  const sorted = normalized.sort((a, b) => a.length - b.length);
+  return {
+    sm: sorted[0] ?? "none",
+    md: sorted[Math.min(1, sorted.length - 1)] ?? "none",
+    lg: sorted[Math.min(2, sorted.length - 1)] ?? "none",
+    xl: sorted[Math.min(3, sorted.length - 1)] ?? "none",
+    inner: normalized.find((shadow) => shadow.includes("inset")) ?? "none"
+  };
+}
+
+export function cacheKeyFromUrl(url: string): string {
+  return `style-guide:${new URL(url).hostname.toLowerCase()}`;
+}
+
+export async function extractStyleGuide(input: { url?: string; domain?: string }): Promise<StyleGuide> {
+  const targetUrl = normalizeUrl(input.url, input.domain);
+  const fallback = FALLBACK_STYLE_GUIDE(targetUrl);
+  try {
+    return await runExtraction(targetUrl, fallback);
+  } catch (error) {
+    if (isBrowserSessionError(error)) {
+      await getBrowser(true);
+      return runExtraction(targetUrl, fallback);
+    }
+    throw error;
   }
 }
 
