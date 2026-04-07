@@ -1,0 +1,60 @@
+export type TypographySpec = {
+  fontFamily: string;
+  fontSize: string;
+  fontWeight: string;
+  lineHeight: string;
+  letterSpacing: string;
+};
+
+export type Colors = {
+  accent: string;
+  background: string;
+  text: string;
+};
+
+export type SpacingScale = {
+  xs: string;
+  sm: string;
+  md: string;
+  lg: string;
+  xl: string;
+};
+
+export type ShadowScale = {
+  sm: string;
+  md: string;
+  lg: string;
+  xl: string;
+  inner: string;
+};
+
+export type ComponentStyles = Record<string, string>;
+
+export type StyleGuide = {
+  url: string;
+  mode: "light" | "dark";
+  colors: Colors;
+  typography: {
+    h1: TypographySpec;
+    h2: TypographySpec;
+    h3: TypographySpec;
+    h4: TypographySpec;
+    p: TypographySpec;
+  };
+  spacing: SpacingScale;
+  shadows: ShadowScale;
+  tokens: Record<string, string>;
+  components: {
+    button: {
+      primary: ComponentStyles;
+      secondary: ComponentStyles;
+      link: ComponentStyles;
+    };
+    card: ComponentStyles;
+  };
+};
+
+export type ExtractParams = {
+  url?: string;
+  domain?: string;
+};
