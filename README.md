@@ -58,6 +58,9 @@ Aggregated endpoint returning:
 ### `GET /screenshot?url=https://example.com`
 Returns a PNG full-page screenshot.
 
+### `GET /` or `GET /ui`
+Built-in test console UI for endpoint validation, request timing, JSON response inspection, and screenshot preview.
+
 ## Run locally
 
 1. Install dependencies

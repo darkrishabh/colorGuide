@@ -11,11 +11,14 @@ import {
 } from "./extractor.js";
 import { captureScreenshot, closeBrowser, extractContextBundle, extractSitemap, scrapePage } from "./context.js";
 import type { ContextResult, ExtractParams, ScrapeParams, ScrapeResult, SitemapResult, StyleGuide } from "./types.js";
+import { uiHtml } from "./ui.js";
 
 const server = Fastify({ logger: true });
 const cache = new CacheService();
 
 server.get("/health", async () => ({ ok: true }));
+server.get("/", async (_request, reply) => reply.type("text/html").send(uiHtml));
+server.get("/ui", async (_request, reply) => reply.type("text/html").send(uiHtml));
 
 const cacheKey = (prefix: string, url: string): string => `${prefix}:${new URL(url).toString().toLowerCase()}`;
 const normalizeError = (error: unknown): Record<string, string> => {
