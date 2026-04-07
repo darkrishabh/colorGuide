@@ -58,3 +58,30 @@ export type ExtractParams = {
   url?: string;
   domain?: string;
 };
+
+export type ScrapeParams = ExtractParams & {
+  format?: "html" | "text";
+};
+
+export type ScrapeResult = {
+  url: string;
+  title: string;
+  description: string;
+  content: string;
+  links: string[];
+  headings: Array<{ tag: "h1" | "h2" | "h3"; text: string }>;
+};
+
+export type SitemapResult = {
+  url: string;
+  urls: string[];
+};
+
+export type ContextResult = {
+  url: string;
+  title: string;
+  description: string;
+  styleGuide: StyleGuide;
+  links: string[];
+  headings: Array<{ tag: "h1" | "h2" | "h3"; text: string }>;
+};

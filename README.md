@@ -43,6 +43,21 @@ Response:
 }
 ```
 
+### `GET /scrape?url=https://example.com&format=text`
+Returns page title, description, headings, links, and extracted `content` in `text` or `html`.
+
+### `GET /sitemap?domain=example.com`
+Returns parsed URLs from `/sitemap.xml`.
+
+### `GET /context?domain=example.com`
+Aggregated endpoint returning:
+- page metadata (title/description)
+- links and headings
+- full style guide extraction
+
+### `GET /screenshot?url=https://example.com`
+Returns a PNG full-page screenshot.
+
 ## Run locally
 
 1. Install dependencies
@@ -71,6 +86,14 @@ docker compose up --build
 - Scans `:root` and `[data-theme]` CSS variables into `tokens`.
 - Normalizes color outputs to hex.
 - Returns structured fallback data when hard extraction fails (timeouts/paywalled/JS-gated pages).
+- Adds context-like utilities: scrape, sitemap extraction, screenshot, and a consolidated context endpoint.
+
+## Performance updates
+
+- Reuses a singleton Chromium browser process to reduce per-request launch overhead.
+- Blocks heavy resources (`image`, `font`, `media`) and common analytics hosts for faster page readiness.
+- Uses a fast-ready strategy (`domcontentloaded` + key selectors), avoiding long `networkidle` waits.
+- Caches results per endpoint and URL in Redis.
 
 ## Lighter Chromium options
 

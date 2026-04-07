@@ -1,3 +1,4 @@
+import type { Browser } from "playwright";
 import { chromium } from "playwright";
 import type { StyleGuide, TypographySpec } from "./types.js";
 
@@ -64,6 +65,17 @@ type RawExtracted = {
   };
   tokens: Record<string, string>;
 };
+
+let browserInstance: Browser | null = null;
+
+async function getBrowser(): Promise<Browser> {
+  if (browserInstance) return browserInstance;
+  browserInstance = await chromium.launch({
+    headless: true,
+    args: ["--disable-dev-shm-usage", "--no-sandbox"]
+  });
+  return browserInstance;
+}
 
 const COLOR_NAMES: Record<string, string> = {
   black: "#000000",
@@ -202,10 +214,7 @@ export function cacheKeyFromUrl(url: string): string {
 export async function extractStyleGuide(input: { url?: string; domain?: string }): Promise<StyleGuide> {
   const targetUrl = normalizeUrl(input.url, input.domain);
   const fallback = FALLBACK_STYLE_GUIDE(targetUrl);
-  const browser = await chromium.launch({
-    headless: true,
-    args: ["--disable-dev-shm-usage", "--no-sandbox"]
-  });
+  const browser = await getBrowser();
 
   try {
     const context = await browser.newContext({
@@ -283,11 +292,6 @@ export async function extractStyleGuide(input: { url?: string; domain?: string }
           const snapshot: Record<string, string> = {};
           for (const key of styleSnapshotProps) {
             snapshot[key] = style.getPropertyValue(key);
-          }
-          for (const property of style) {
-            if (!snapshot[property]) {
-              snapshot[property] = style.getPropertyValue(property);
-            }
           }
           return snapshot;
         };
@@ -476,7 +480,7 @@ export async function extractStyleGuide(input: { url?: string; domain?: string }
       components: raw.components
     };
   } finally {
-    await browser.close();
+    // Browser instance is shared for lower latency.
   }
 }
 
@@ -518,4 +522,10 @@ export function normalizeStyleGuideColors(styleGuide: StyleGuide): StyleGuide {
     },
     tokens: normalizedTokens
   };
+}
+
+export async function closeExtractorBrowser(): Promise<void> {
+  if (!browserInstance) return;
+  await browserInstance.close();
+  browserInstance = null;
 }

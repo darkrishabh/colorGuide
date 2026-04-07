@@ -1,5 +1,4 @@
 import { createClient, type RedisClientType } from "redis";
-import type { StyleGuide } from "./types.js";
 
 const DAY_SECONDS = 60 * 60 * 24;
 
@@ -21,14 +20,14 @@ export class CacheService {
     this.connected = true;
   }
 
-  async get(key: string): Promise<StyleGuide | null> {
+  async getJSON<T>(key: string): Promise<T | null> {
     if (!this.client || !this.connected) return null;
     const raw = await this.client.get(key);
     if (!raw) return null;
-    return JSON.parse(raw) as StyleGuide;
+    return JSON.parse(raw) as T;
   }
 
-  async set(key: string, value: StyleGuide, ttlSeconds = DAY_SECONDS): Promise<void> {
+  async setJSON(key: string, value: unknown, ttlSeconds = DAY_SECONDS): Promise<void> {
     if (!this.client || !this.connected) return;
     await this.client.set(key, JSON.stringify(value), { EX: ttlSeconds });
   }
