@@ -112,6 +112,16 @@ export const uiHtml = `<!doctype html>
       <section class="card">
         <div class="grid">
           <div>
+            <label for="preset">Preset</label>
+            <select id="preset">
+              <option value="">custom</option>
+              <option value="gigaqr.com">gigaqr.com</option>
+              <option value="stripe.com">stripe.com</option>
+              <option value="github.com">github.com</option>
+              <option value="claude.ai">claude.ai</option>
+            </select>
+          </div>
+          <div>
             <label for="endpoint">Endpoint</label>
             <select id="endpoint">
               <option value="extract">/extract</option>
@@ -163,6 +173,7 @@ export const uiHtml = `<!doctype html>
 
     <script>
       const endpointEl = document.getElementById("endpoint");
+      const presetEl = document.getElementById("preset");
       const urlEl = document.getElementById("url");
       const domainEl = document.getElementById("domain");
       const formatEl = document.getElementById("format");
@@ -262,6 +273,17 @@ export const uiHtml = `<!doctype html>
           updateValidation();
         }
       }
+
+      presetEl.addEventListener("input", () => {
+        const value = presetEl.value.trim();
+        if (value) {
+          domainEl.value = value;
+          if (!urlEl.value.trim()) {
+            urlEl.value = "";
+          }
+        }
+        updateValidation();
+      });
 
       [endpointEl, urlEl, domainEl, formatEl].forEach((el) => el.addEventListener("input", updateValidation));
       runBtn.addEventListener("click", runRequest);
